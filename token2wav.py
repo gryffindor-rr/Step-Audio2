@@ -117,7 +117,9 @@ class Token2wav():
         # Pre-allocate cache to maximum size for constant memory usage
         if preallocate_to_max:
             # Calculate ceiling: prompt + context_window + frames_per_chunk
-            frames_per_chunk = (max_chunk_size - 3) * 2
+            pre_lookahead_len = self.flow.encoder.pre_lookahead_layer.pre_lookahead_len
+            up_stride = self.flow.encoder.up_layer.stride
+            frames_per_chunk = (max_chunk_size - pre_lookahead_len) * up_stride
             cache_ceiling = prompt_mels.shape[1] + self.stream_context_window + frames_per_chunk
 
             # Pad estimator attention cache to ceiling
