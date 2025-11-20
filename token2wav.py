@@ -351,12 +351,12 @@ if __name__ == '__main__':
     prompt_wav = 'assets/default_male.wav'
 
     # Non-streaming version
-    #print("Running non-streaming inference...")
-    #audio = token2wav(tokens, prompt_wav)
-    #output_path_non_stream = 'assets/give_me_a_brief_introduction_to_the_great_wall.wav'
-    #with open(output_path_non_stream, 'wb') as f:
-    #    f.write(audio)
-    #print(f"Non-streaming audio saved to {output_path_non_stream}")
+    print("Running non-streaming inference...")
+    audio = token2wav(tokens, prompt_wav)
+    output_path_non_stream = 'assets/give_me_a_brief_introduction_to_the_great_wall.wav'
+    with open(output_path_non_stream, 'wb') as f:
+        f.write(audio)
+    print(f"Non-streaming audio saved to {output_path_non_stream}")
 
     # Streaming version
     print("\nRunning streaming inference...")
