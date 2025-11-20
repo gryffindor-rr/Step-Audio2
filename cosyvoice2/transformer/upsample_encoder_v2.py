@@ -35,7 +35,7 @@ from cosyvoice2.utils.mask import (
 
 import torch._dynamo
 torch._dynamo.config.suppress_errors = True
-torch._dynamo.config.cache_size_limit = 128 
+torch._dynamo.config.cache_size_limit = 128
 
 class Upsample1D(nn.Module):
     """A 1D upsampling layer with an optional convolution.
@@ -65,16 +65,16 @@ class Upsample1D(nn.Module):
         outputs = F.pad(outputs, (self.stride * 2, 0), value=0.0)
         outputs = self.conv(outputs)
         return outputs, input_lengths * self.stride
-    
+
     def forward_chunk(self, inputs: torch.Tensor, input_lengths: torch.Tensor, cache: torch.Tensor = torch.zeros((0, 0, 0))):
         """
         Args:
             inputs(torch.Tensor): shape (b, c, t)
-            input_length(torch.Tensor): shape (b), can be None 
+            input_length(torch.Tensor): shape (b), can be None
             cache(torch.Tensor): shape (b, c, cache_t), where cache_t = stride * 2
         """
         outputs = F.interpolate(inputs, scale_factor=self.scale_factor, mode="nearest")
-        
+
         if cache is None:
             cache = inputs.new_zeros(inputs.shape[0], inputs.shape[1], self.stride * 2)
         outputs = torch.cat([cache, outputs], dim=2)
@@ -117,7 +117,7 @@ class PreLookaheadLayer(nn.Module):
         # residual connection
         outputs = outputs + inputs
         return outputs
-    
+
     def forward_chunk(self, inputs: torch.Tensor, cache: torch.Tensor = None):
         """
         Args:
@@ -129,7 +129,7 @@ class PreLookaheadLayer(nn.Module):
         # the length of outputs is input length - pre_lookahead_len
         if cache is None:
             cache = outputs.new_zeros(outputs.shape[0], outputs.shape[1], 2)
-        # NOTE 
+        # NOTE
         new_cache = outputs[..., -2:]
         outputs = torch.cat([cache, outputs], dim=2)
         outputs = self.conv2(outputs)
@@ -202,7 +202,7 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
             activation,
         )
         self.pre_lookahead_layer = PreLookaheadLayer(
-            channels=output_size, 
+            channels=output_size,
             pre_lookahead_len=pre_lookahead_len
         )
         self.encoders = torch.nn.ModuleList([
@@ -217,11 +217,11 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
                 dropout_rate,
                 normalize_before,
             ) for _ in range(num_blocks)
-        ]) 
+        ])
         self.up_layer = Upsample1D(
-            channels=output_size, 
-            out_channels=output_size, 
-            stride=up_stride, 
+            channels=output_size,
+            out_channels=output_size,
+            stride=up_stride,
             scale_factor=up_scale_factor
         )
         self.up_embed = COSYVOICE_SUBSAMPLE_CLASSES[input_layer](
@@ -254,31 +254,31 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
         self.inference_buffers_encoder = {}
         self.inference_buffers_up_encoder = {}
         self.max_static_time = 1500
-    
-    # FIXME(sfy) revert hard-coded bfloat16 
+
+    # FIXME(sfy) revert hard-coded bfloat16
     # this method is skipped in CausalMaskedDiffWithXvec.scatter_cuda_graph
     def scatter_cuda_graph(self, enable_cuda_graph: bool):
         self.enable_cuda_graph = enable_cuda_graph
         if self.enable_cuda_graph:
             self._init_cuda_graph()
-    
+
     def _init_cuda_graph(self):
         """初始化 CUDA Graph"""
 
         for l in range(100, 1500, 10):
-            static_x = torch.zeros((1, l, 512), 
+            static_x = torch.zeros((1, l, 512),
                                 dtype=torch.float32, device=torch.device('cuda'))
-            static_mask = torch.ones((1, 1, l), 
+            static_mask = torch.ones((1, 1, l),
                                     dtype=torch.bool, device=torch.device('cuda'))
-            static_pos_emb = torch.zeros((1, 2*l-1, 512), 
+            static_pos_emb = torch.zeros((1, 2*l-1, 512),
                                         dtype=torch.float32, device=torch.device('cuda'))
-            
+
             static_inputs = [
                 static_x,
                 static_mask,
                 static_pos_emb,
             ]
-            
+
             self._forward_impl_encoder(
                 static_inputs[0],
                 static_inputs[1],
@@ -302,19 +302,19 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
             }
 
         for l in range(100, 1500, 10):
-            static_x = torch.zeros((1, l, 512), 
+            static_x = torch.zeros((1, l, 512),
                                 dtype=torch.float32, device=torch.device('cuda'))
-            static_mask = torch.ones((1, 1, l), 
+            static_mask = torch.ones((1, 1, l),
                                     dtype=torch.bool, device=torch.device('cuda'))
-            static_pos_emb = torch.zeros((1, 2*l-1, 512), 
+            static_pos_emb = torch.zeros((1, 2*l-1, 512),
                                         dtype=torch.float32, device=torch.device('cuda'))
-            
+
             static_inputs = [
                 static_x,
                 static_mask,
                 static_pos_emb,
             ]
-            
+
             self._forward_impl_up_encoder(
                 static_inputs[0],
                 static_inputs[1],
@@ -348,7 +348,7 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
         for layer in self.encoders:
             x, _, _, _ = layer(x, mask, pos_emb)
         return x
-    
+
     # @torch.compile(dynamic=True,backend="eager")
     def _forward_impl_up_encoder(self,
                              x: torch.Tensor,
@@ -357,10 +357,10 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
         for layer in self.up_encoders:
             x, _, _, _ = layer(x, mask, pos_emb)
         return x
-    
+
     def output_size(self) -> int:
         return self._output_size
-    
+
     # @torch.compile(dynamic=True,backend="eager")
     def forward(
         self,
@@ -379,7 +379,7 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
             self.inference_buffers_encoder[xs.shape[1]]['static_inputs'][0].copy_(xs)
             self.inference_buffers_encoder[xs.shape[1]]['static_inputs'][1].copy_(masks)
             self.inference_buffers_encoder[xs.shape[1]]['static_inputs'][2].copy_(pos_emb)
-            self.graph_encoder[xs.shape[1]].replay()    
+            self.graph_encoder[xs.shape[1]].replay()
             xs = self.inference_buffers_encoder[xs.shape[1]]['static_outputs'][0]
         else:
             xs = self._forward_impl_encoder(xs, masks, pos_emb)
@@ -387,7 +387,7 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
         xs = xs.transpose(1, 2).contiguous()
         xs, xs_lens = self.up_layer(xs, xs_lens)
         xs = xs.transpose(1, 2).contiguous()
-        
+
         # 2nd conformer block
         T = xs.size(1)
         masks = ~make_pad_mask(xs_lens, T).unsqueeze(1)  # (B, 1, T)
@@ -411,6 +411,8 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
                       last_chunk: bool = False,
                       cnn_cache: torch.Tensor = None,
                       att_cache: torch.Tensor = None,
+                      offset1: int = None,
+                      cache_valid_size: int = None,
                       ):
         """
         Args:
@@ -418,29 +420,52 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
             last_chunk: bool. If last chunk, will pad input with lookaheads
             att_cache: shape (depth1+depth2, b, nh, 2*t1, c).
             cnn_cache: shape (b, c, t1+t2). Where t1=2 (pre_lookahead_layer), t2=4 (up_layer)
-        """ 
+            offset1: explicit offset for positional encoding (overrides cache-based calculation)
+            cache_valid_size: valid size of pre-allocated cache (for constant memory mode)
+        """
         if att_cache is not None:
             assert att_cache.shape[3] % 2 == 0, att_cache.shape
         if cnn_cache is not None:
             assert cnn_cache.shape[2] == 2+self.up_layer.stride*2, cnn_cache.shape
 
         # unpack caches
-        offset1 = att_cache.shape[3] // 2 if att_cache is not None else 0
-        att_cache1 = att_cache[:len(self.encoders), :, :, :offset1] if att_cache is not None else [None] * len(self.encoders)
-        att_cache2 = att_cache[len(self.encoders):] if att_cache is not None else [None] * len(self.encoders)
+        # Cache structure: [depth1+depth2, b, nh, t, c]
+        # - First depth1 layers: token-space cache repeated 2x, so t = 2*token_size (mel-space)
+        # - Last depth2 layers: mel-space cache, so t = 2*token_size (mel-space)
+        # When slicing att_cache1, we take first half to get token-space size
+
+        if cache_valid_size is not None:
+            # Pre-allocated mode: cache_valid_size is in mel-space
+            cache_size = cache_valid_size // 2  # Convert to token-space for first conformer
+            cache_size1 = cache_valid_size // 2  # Token-space size for first conformer slicing
+            cache_size2 = cache_valid_size  # Mel-space size for second conformer slicing
+        else:
+            # Dynamic mode: derive from actual cache shape
+            cache_size = att_cache.shape[3] // 2 if att_cache is not None else 0
+            cache_size1 = cache_size  # Slice first part to token-space
+            cache_size2 = att_cache.shape[3] if att_cache is not None else 0  # Keep second part as-is
+
+        if offset1 is None:
+            offset1 = cache_size
+
+        # Slice cache based on actual valid size, not allocated size
+        att_cache1 = att_cache[:len(self.encoders), :, :, :cache_size1] if att_cache is not None else [None] * len(self.encoders)
+        att_cache2 = att_cache[len(self.encoders):, :, :, :cache_size2] if att_cache is not None else [None] * len(self.encoders)
         cnn_cache1 = cnn_cache[:, :, :2] if cnn_cache is not None else None
         cnn_cache2 = cnn_cache[:, :, 2:] if cnn_cache is not None else None
         xs, _, _ = self.embed(xs, None)
         if last_chunk:
             xs = F.pad(xs, (0, 0, 0, self.pre_lookahead_layer.pre_lookahead_len))
-        
+
         # this_cnn_cache: shape (b=1, c=512, t=2)
         xs, new_cnn_cache1 = self.pre_lookahead_layer.forward_chunk(xs, cache=cnn_cache1)
 
-        # remake pos_emb, offset param is ignored by position_encoding
-        pos_emb = self.embed.position_encoding(offset=None, size=offset1 + xs.shape[1])
+        # remake pos_emb for first conformer (token-space)
+        # pos_emb size must match actual sequence length (cache + current)
+        # cache_size is already in token-space
+        pos_emb = self.embed.position_encoding(offset=None, size=cache_size + xs.shape[1])
 
-        # first conformer 
+        # first conformer
         chunk_masks = torch.zeros((0, 0, 0))
         new_att_cache1 = []
 
@@ -459,8 +484,9 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
         # at this time, xs are doubled in length
         xs, _, _ = self.up_embed(xs, None)
 
-        # remake pos_emb
-        pos_emb = self.embed.position_encoding(offset=None, size=offset1 * self.up_layer.stride + xs.shape[1])
+        # remake pos_emb for second conformer (mel-space)
+        # Use cache_size2 which is the mel-space cache size
+        pos_emb = self.embed.position_encoding(offset=None, size=cache_size2 + xs.shape[1])
 
         # second conformer
         chunk_masks = torch.zeros((0, 0, 0),dtype=torch.bfloat16)
@@ -473,11 +499,9 @@ class UpsampleConformerEncoderV2(torch.nn.Module):
 
         if self.normalize_before:
             xs = self.after_norm(xs)
-        
+
         # pack new cache
         new_att_cache = torch.cat([new_att_cache1.repeat(1, 1, 1, 2, 1), new_att_cache2], dim=0)
         new_cnn_cache = torch.cat([new_cnn_cache1, new_cnn_cache2], dim=2)
 
         return xs, new_cnn_cache, new_att_cache
-
-

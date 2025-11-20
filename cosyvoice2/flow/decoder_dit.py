@@ -81,7 +81,7 @@ class Attention(torch.nn.Module):
         ts = ts.reshape(b, t, self.num_heads, c // self.num_heads)
         ts = ts.transpose(1, 2)
         return ts
-    
+
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor) -> torch.Tensor:
         """Args:
             x(torch.Tensor): shape (b, t, c)
@@ -96,7 +96,7 @@ class Attention(torch.nn.Module):
         q = self.to_heads(q)    # (b, nh, t, c)
         k = self.to_heads(k)
         v = self.to_heads(v)
-    
+
         q = self.q_norm(q)
         k = self.k_norm(k)
 
@@ -110,7 +110,7 @@ class Attention(torch.nn.Module):
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
-    
+
     def forward_chunk(self, x: torch.Tensor, att_cache: torch.Tensor=None, attn_mask: torch.Tensor=None):
         """
         Args:
@@ -126,7 +126,7 @@ class Attention(torch.nn.Module):
         q = self.to_heads(q)    # (b, nh, t, c)
         k = self.to_heads(k)
         v = self.to_heads(v)
-    
+
         q = self.q_norm(q)
         k = self.k_norm(k)
 
@@ -135,13 +135,13 @@ class Attention(torch.nn.Module):
             if attn_mask is not None:
                 k_cache, v_cache = att_cache.chunk(2, dim=3)
                 k = torch.cat([k, k_cache], dim=2)
-                v = torch.cat([v, v_cache], dim=2)    
+                v = torch.cat([v, v_cache], dim=2)
 
-            else:    
+            else:
                 k_cache, v_cache = att_cache.chunk(2, dim=3)
                 k = torch.cat([k, k_cache], dim=2)
-                v = torch.cat([v, v_cache], dim=2)      
-        
+                v = torch.cat([v, v_cache], dim=2)
+
         # new {k,v}_cache
         new_att_cache = torch.cat([k, v], dim=3)
         # attn_mask = torch.ones((b, 1, t, t1), dtype=torch.bool, device=x.device)
@@ -226,7 +226,7 @@ class CausalConv1d(torch.nn.Conv1d):
         x = F.pad(x, self.causal_padding)
         x = super(CausalConv1d, self).forward(x)
         return x
-    
+
     def forward_chunk(self, x: torch.Tensor, cnn_cache: torch.Tensor=None):
         if cnn_cache is None:
             cnn_cache = x.new_zeros((x.shape[0], self.in_channels, self.causal_padding[0]))
@@ -261,7 +261,7 @@ class CausalConvBlock(nn.Module):
             CausalConv1d(out_channels, out_channels, kernel_size),
             Transpose(1, 2),
         )
-    
+
     def forward(self, x: torch.Tensor, mask: torch.Tensor = None):
         """
         Args:
@@ -272,7 +272,7 @@ class CausalConvBlock(nn.Module):
         x = self.block(x)
         if mask is not None: x = x * mask
         return x
-    
+
     def forward_chunk(self, x: torch.Tensor, cnn_cache: torch.Tensor=None):
         """
         Args:
@@ -326,7 +326,7 @@ class DiTBlock(nn.Module):
         # mlp
         x = x + gate_mlp * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
         return x
-    
+
     def forward_chunk(self, x: torch.Tensor, c: torch.Tensor, cnn_cache: torch.Tensor=None, att_cache: torch.Tensor=None, mask: torch.Tensor=None):
         """
         Args:
@@ -448,21 +448,21 @@ class DiT(nn.Module):
                 static_att_cache = torch.zeros((16, 2, 8, max_size, 128), dtype=dtype, device=device)
                 static_cnn_cache = torch.zeros((16, 2, 1024, 2), dtype=dtype, device=device)
                 static_inputs1 = [
-                    static_x1, 
-                    static_t1, 
-                    static_mask1, 
-                    static_cnn_cache, 
-                    static_att_cache, 
+                    static_x1,
+                    static_t1,
+                    static_mask1,
+                    static_cnn_cache,
+                    static_att_cache,
                 ]
                 static_new_cnn_cache = torch.zeros((16, 2, 1024, 2), dtype=dtype, device=device)
                 static_new_att_cache = torch.zeros((16, 2, 8, max_size+chunk_size, 128), dtype=dtype, device=device)
                 self.blocks_forward_chunk(
-                    static_inputs1[0], 
-                    static_inputs1[1], 
-                    static_inputs1[2], 
-                    static_inputs1[3], 
-                    static_inputs1[4], 
-                    static_new_cnn_cache, 
+                    static_inputs1[0],
+                    static_inputs1[1],
+                    static_inputs1[2],
+                    static_inputs1[3],
+                    static_inputs1[4],
+                    static_new_cnn_cache,
                     static_new_att_cache)
                 graph_chunk = torch.cuda.CUDAGraph()
                 with torch.cuda.graph(graph_chunk):
@@ -510,14 +510,15 @@ class DiT(nn.Module):
         x = x.transpose(1, 2)
         return x
 
-    def forward_chunk(self, 
-                      x: torch.Tensor, 
-                      mu: torch.Tensor, 
-                      t: torch.Tensor, 
-                      spks: torch.Tensor, 
-                      cond: torch.Tensor, 
+    def forward_chunk(self,
+                      x: torch.Tensor,
+                      mu: torch.Tensor,
+                      t: torch.Tensor,
+                      spks: torch.Tensor,
+                      cond: torch.Tensor,
                       cnn_cache: torch.Tensor = None,
                       att_cache: torch.Tensor = None,
+                      cache_valid_size: int = None,
                       ):
         """
         Args:
@@ -544,7 +545,11 @@ class DiT(nn.Module):
             cnn_cache = [None] * len(self.blocks)
         if att_cache is None:
             att_cache = [None] * len(self.blocks)
-        if att_cache[0] is not None:
+
+        # Use valid size if provided (pre-allocated mode), otherwise use allocated size
+        if cache_valid_size is not None:
+            last_att_len = cache_valid_size
+        elif att_cache[0] is not None:
             last_att_len = att_cache.shape[3]
         else:
             last_att_len = 0
@@ -563,7 +568,7 @@ class DiT(nn.Module):
             self.graph_chunk[chunk_size].replay()
             x = self.inference_buffers_chunk[chunk_size]['static_outputs'][0][:, :, :chunk_size]
             new_cnn_cache = self.inference_buffers_chunk[chunk_size]['static_outputs'][1]
-            new_att_cache = self.inference_buffers_chunk[chunk_size]['static_outputs'][2][:, :, :, :chunk_size+last_att_len, :]          
+            new_att_cache = self.inference_buffers_chunk[chunk_size]['static_outputs'][2][:, :, :, :chunk_size+last_att_len, :]
         else:
             mask = None
             x = self.blocks_forward_chunk(x, t, mask, cnn_cache, att_cache, self.cnn_cache_buffer, self.att_cache_buffer)
@@ -571,7 +576,7 @@ class DiT(nn.Module):
             new_att_cache = self.att_cache_buffer[:, :, :, :last_att_len+chunk_size, :]
 
         return x, new_cnn_cache, new_att_cache
-    
+
     def blocks_forward_chunk(self, x, t, mask, cnn_cache=None, att_cache=None, cnn_cache_buffer=None, att_cache_buffer=None):
         x = x.transpose(1, 2)
         x = self.in_proj(x)

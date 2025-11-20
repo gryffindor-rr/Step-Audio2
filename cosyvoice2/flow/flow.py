@@ -77,11 +77,11 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         # xvec projection
         embedding = F.normalize(embedding, dim=1)
         embedding = self.spk_embed_affine_layer(embedding)
-    
+
         # concat text and prompt_text
         token_len = prompt_token_len + token_len
         token = torch.concat([prompt_token, token], dim=1)
-        
+
         mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
         token = self.input_embedding(torch.clamp(token, min=0)) * mask
 
@@ -112,10 +112,10 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         return feat
 
     @torch.inference_mode()
-    def setup_cache(self, 
-                    token: torch.Tensor, 
-                    mel: torch.Tensor, 
-                    spk: torch.Tensor, 
+    def setup_cache(self,
+                    token: torch.Tensor,
+                    mel: torch.Tensor,
+                    spk: torch.Tensor,
                     n_timesteps: int = 10,
                     ):
         """
@@ -125,7 +125,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
             spk: shape (b, 192), speaker embedding
         Returns:
             cache: dict {
-                'conformer': {'cnn_cache': xxx, 'att_cache': xxx}, 
+                'conformer': {'cnn_cache': xxx, 'att_cache': xxx},
                 'estimator': {'cnn_cache': xxx, 'att_cache': xxx}
             }
         """
@@ -165,12 +165,14 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         return cache
 
     @torch.inference_mode()
-    def inference_chunk(self, 
+    def inference_chunk(self,
                         token: torch.Tensor,
-                        spk: torch.Tensor, 
+                        spk: torch.Tensor,
                         cache: dict,
                         last_chunk: bool = False,
                         n_timesteps: int = 10,
+                        conformer_offset: int = None,
+                        cache_valid_size: int = None,
                         ):
         """
         Args:
@@ -180,12 +182,22 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
                 'conformer_cnn_cache': xxx,
                 ...
             }
+            conformer_offset: explicit offset for conformer positional encoding
+            cache_valid_size: valid size of pre-allocated cache (for constant memory mode)
         """
         # unpack cache
         conformer_cnn_cache = cache['conformer_cnn_cache']
         conformer_att_cache = cache['conformer_att_cache']
         estimator_cnn_cache = cache['estimator_cnn_cache']
         estimator_att_cache = cache['estimator_att_cache']
+
+        print("    [flow.inference_chunk] Input cache:")
+        print(f"      conformer_cnn_cache: {conformer_cnn_cache.shape}")
+        print(f"      conformer_att_cache: {conformer_att_cache.shape}")
+        print(f"      estimator_cnn_cache: {estimator_cnn_cache.shape}")
+        print(f"      estimator_att_cache: {estimator_att_cache.shape}")
+        if conformer_offset is not None:
+            print(f"      conformer_offset: {conformer_offset}, cache_size (mel-space): {conformer_att_cache.shape[3]}")
 
         # xvec projection
         spk = F.normalize(spk, dim=1)
@@ -198,11 +210,18 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
             last_chunk = last_chunk,
             cnn_cache = conformer_cnn_cache,
             att_cache = conformer_att_cache,
+            offset1 = conformer_offset,
+            cache_valid_size = cache_valid_size,
         )
         h = self.encoder_proj(h)
 
+        print("    [flow.inference_chunk] After encoder:")
+        print(f"      conformer_cnn_cache: {conformer_cnn_cache.shape}")
+        print(f"      conformer_att_cache: {conformer_att_cache.shape}")
+
         cond = torch.zeros_like(h)
-        # forward estimator
+        # forward estimator (decoder)
+        # Pass cache_valid_size so decoder can respect pre-allocated cache bounds
         feat, estimator_cnn_cache, estimator_att_cache = self.decoder.forward_chunk(
             mu = h.transpose(1, 2).contiguous(),
             spks = spk,
@@ -211,8 +230,12 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
             temperature = 1.0,
             cnn_cache = estimator_cnn_cache,
             att_cache = estimator_att_cache,
+            cache_valid_size = cache_valid_size,
         )
 
+        print("    [flow.inference_chunk] After decoder:")
+        print(f"      estimator_cnn_cache: {estimator_cnn_cache.shape}")
+        print(f"      estimator_att_cache: {estimator_att_cache.shape}")
 
         new_cache = {
             'conformer_cnn_cache': conformer_cnn_cache,
@@ -221,5 +244,6 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
             'estimator_att_cache': estimator_att_cache,
         }
 
-        return feat, new_cache
+        print("    [flow.inference_chunk] Output feat shape:", feat.shape)
 
+        return feat, new_cache

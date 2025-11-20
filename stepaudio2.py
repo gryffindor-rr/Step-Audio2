@@ -7,7 +7,7 @@ from utils import compute_token_num, load_audio, log_mel_spectrogram, padding_me
 class StepAudio2Base:
 
     def __init__(self, model_path: str):
-        self.llm_tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, padding_side="right")
+        self.llm_tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, padding_side="right", use_fast=False)
         self.llm = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, torch_dtype=torch.bfloat16).cuda()
         self.eos_token_id = self.llm_tokenizer.eos_token_id
 

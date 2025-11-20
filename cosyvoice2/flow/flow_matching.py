@@ -63,7 +63,7 @@ class CausalConditionalCFM(torch.nn.Module):
         mu_in = torch.cat([mu, torch.zeros_like(mu)], dim=0)
         spks_in = torch.cat([spks, torch.zeros_like(spks)], dim=0)
         cond_in = torch.cat([cond, torch.zeros_like(cond)], dim=0)
-        
+
         for step in range(1, len(t_span)):
 
             x_in = torch.cat([x, x], dim=0)
@@ -94,14 +94,15 @@ class CausalConditionalCFM(torch.nn.Module):
         t_span = 1 - torch.cos(t_span * 0.5 * torch.pi)
         return self.solve_euler(z, t_span, mu, mask, spks, cond)
 
-    def solve_euler_chunk(self, 
-                          x:torch.Tensor, 
-                          t_span:torch.Tensor, 
-                          mu:torch.Tensor, 
-                          spks:torch.Tensor, 
-                          cond:torch.Tensor, 
+    def solve_euler_chunk(self,
+                          x:torch.Tensor,
+                          t_span:torch.Tensor,
+                          mu:torch.Tensor,
+                          spks:torch.Tensor,
+                          cond:torch.Tensor,
                           cnn_cache:torch.Tensor=None,
                           att_cache:torch.Tensor=None,
+                          cache_valid_size:int=None,
                           ):
         """
         Fixed euler solver for ODEs.
@@ -120,7 +121,7 @@ class CausalConditionalCFM(torch.nn.Module):
             att_cache: shape (n_time, depth, b, nh, t, c * 2)
         """
         assert self.inference_cfg_rate > 0, 'cfg rate should be > 0'
-        
+
         t, _, dt = t_span[0], t_span[-1], t_span[1] - t_span[0]
         t = t.unsqueeze(dim=0)  # (b,)
 
@@ -130,8 +131,10 @@ class CausalConditionalCFM(torch.nn.Module):
         if att_cache is None:
             att_cache = [None for _ in range(len(t_span)-1)]
         # next chunk's cache at each timestep
-
-        if att_cache[0] is not None:
+        # Use valid size if provided (pre-allocated mode), otherwise use allocated size
+        if cache_valid_size is not None:
+            last_att_len = cache_valid_size
+        elif att_cache[0] is not None:
             last_att_len = att_cache.shape[4]
         else:
             last_att_len = 0
@@ -154,6 +157,7 @@ class CausalConditionalCFM(torch.nn.Module):
                 cond = cond_in,
                 cnn_cache = this_cnn_cache,
                 att_cache = this_att_cache,
+                cache_valid_size = cache_valid_size,
             )
             dphi_dt, cfg_dphi_dt = dphi_dt.chunk(2, dim=0)
             dphi_dt = ((1.0 + self.inference_cfg_rate) * dphi_dt - self.inference_cfg_rate * cfg_dphi_dt)
@@ -164,20 +168,21 @@ class CausalConditionalCFM(torch.nn.Module):
 
             self.cnn_cache_buffer[step-1] = this_new_cnn_cache
             self.att_cache_buffer[step-1][:, :, :, :x.shape[2]+last_att_len, :] = this_new_att_cache
-        
+
         cnn_cache = self.cnn_cache_buffer
         att_cache = self.att_cache_buffer[:, :, :, :, :x.shape[2]+last_att_len, :]
         return x, cnn_cache, att_cache
-    
+
     @torch.inference_mode()
-    def forward_chunk(self, 
-                      mu:torch.Tensor, 
-                      spks:torch.Tensor, 
+    def forward_chunk(self,
+                      mu:torch.Tensor,
+                      spks:torch.Tensor,
                       cond:torch.Tensor,
-                      n_timesteps:int=10, 
-                      temperature:float=1.0, 
+                      n_timesteps:int=10,
+                      temperature:float=1.0,
                       cnn_cache:torch.Tensor=None,
                       att_cache:torch.Tensor=None,
+                      cache_valid_size:int=None,
                       ):
         """
         Args:
@@ -186,9 +191,13 @@ class CausalConditionalCFM(torch.nn.Module):
             cond(torch.Tensor): shape (b, c, t)
             cnn_cache: shape (n_time, depth, b, c1+c2, 2)
             att_cache: shape (n_time, depth, b, nh, t, c * 2)
+            cache_valid_size: valid size of pre-allocated cache
         """
-        # get offset from att_cache
-        offset = att_cache.shape[4] if att_cache is not None else 0
+        # get offset from att_cache (use valid size if provided)
+        if cache_valid_size is not None:
+            offset = cache_valid_size
+        else:
+            offset = att_cache.shape[4] if att_cache is not None else 0
         z = self.rand_noise[:, :, offset:offset+mu.size(2)] * temperature
         t_span = torch.linspace(0, 1, n_timesteps + 1, device=mu.device, dtype=mu.dtype)
         # cosine scheduling
@@ -201,5 +210,6 @@ class CausalConditionalCFM(torch.nn.Module):
             cond=cond,
             att_cache=att_cache,
             cnn_cache=cnn_cache,
+            cache_valid_size=cache_valid_size,
         )
         return x, new_cnn_cache, new_att_cache
